@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// KeyName - ключевое поле в опроснике по которому все они сводятся
+const KeyName = "Номер моб. телефона"
+
 func main() {
 
 	model.InitDB()
@@ -26,6 +29,34 @@ func main() {
 
 		if Checksum != checkSumOrig {
 
+			var answerOptionNew [][]model.AnswerOption
+
+			google := model.GoogleSheet{
+				Spreadsheet: config.Spredsheet,
+			}
+
+			result = google.Init()
+			if !result.Result {
+				fmt.Println(result.Error)
+				break
+			}
+
+			var keys map[int]string
+			keys, result = google.Keys()
+			if !result.Result {
+				fmt.Println(result.Error)
+				break
+			}
+
+			var columns map[string]map[string]string
+			columns, result = google.Columns()
+			if !result.Result {
+				fmt.Println(result.Error)
+				break
+			}
+			fmt.Printf("%+v", columns)
+			break
+
 			var entries []model.FormEntry
 			model.Connect.Find(&entries)
 
@@ -39,19 +70,28 @@ func main() {
 					var jsonOut string
 
 					jsonOut = string(out)
-					if jsonOut != "" {
-						var answerOption []model.AnswerOption
-						json.Unmarshal([]byte(jsonOut), &answerOption)
-						//fmt.Printf("%+v", answerOption)
 
-						google := model.GoogleSheet{
-							Spreadsheet: config.Spredsheet,
+					if jsonOut != "" {
+
+						var answerOptions []model.AnswerOption
+						json.Unmarshal([]byte(jsonOut), &answerOptions)
+
+						isNewAnswer := true
+						for _, answerOption := range answerOptions {
+
+							if answerOption.Name != KeyName {
+								continue
+							}
+
+							for _, key := range keys {
+								if key == answerOption.Value {
+									isNewAnswer = false
+								}
+							}
 						}
-						result = google.Init()
-						if result.Result {
-							//google.Write()
-						} else {
-							fmt.Printf("%+v", result)
+
+						if isNewAnswer {
+							answerOptionNew = append(answerOptionNew, answerOptions)
 						}
 
 					}

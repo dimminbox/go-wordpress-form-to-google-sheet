@@ -17,6 +17,7 @@ import (
 // GoogleSheet - структура для работы с гугл таблицами
 type GoogleSheet struct {
 	Spreadsheet string
+	Service     *sheets.Service
 }
 
 /*func (g *GoogleSheet) Write() (result Result) {
@@ -38,17 +39,12 @@ type GoogleSheet struct {
 // Init соединяется с Google
 func (g *GoogleSheet) Init() (result Result) {
 
+	var err error
 	data, err := ioutil.ReadFile("credentials.json")
 	if err != nil {
 		result = GenError(err.Error())
 		return
 	}
-
-	/*conf, err := google.JWTConfigFromJSON(data, spreadsheet.Scope)
-	if err != nil {
-		result = GenError(err.Error())
-		return
-	}*/
 
 	config, err := google.ConfigFromJSON(data, "https://www.googleapis.com/auth/spreadsheets")
 	if err != nil {
@@ -56,39 +52,91 @@ func (g *GoogleSheet) Init() (result Result) {
 	}
 	client := g.getClient(config)
 
-	srv, err := sheets.New(client)
+	g.Service, err = sheets.New(client)
 	if err != nil {
 		log.Fatalf("Unable to retrieve Sheets client: %v", err)
+	} else {
+		result.Result = true
 	}
 
-	// Prints the names and majors of students in a sample spreadsheet:
-	// https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edi
-	readRange := "Response!A2:E"
-	resp, err := srv.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+	/*readRange := "Response!A2:E"
+	_, err = g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+
 	if err != nil {
 		result = GenError(err.Error())
 		return
 	} else {
 		result.Result = true
-	}
-
-	fmt.Printf("%+v", resp)
-	/*client := conf.Client(context.TODO())
-	service := spreadsheet.NewServiceWithClient(client)
-
-	spreadsheet, err := service.FetchSpreadsheet(g.Spreadsheet)
-	if err != nil {
-		result = GenError(err.Error())
-		return
-	}
-
-	sheet, err := spreadsheet.SheetByIndex(0)
-	if err == nil {
-		g.Sheet = *sheet
-		result.Result = true
-	} else {
-		result = GenError(err.Error())
 	}*/
+
+	return
+}
+
+// Keys получает все ключи записей
+func (g *GoogleSheet) Keys() (keys map[int]string, result Result) {
+
+	keys = map[int]string{}
+
+	readRange := "Response!A1:A1000000"
+	resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+
+	if err != nil {
+		result = GenError(err.Error())
+	} else {
+
+		for i, val := range resp.Values {
+			if i > 1 {
+				keys[i] = fmt.Sprintf("%s", val[0])
+			}
+		}
+		result.Result = true
+	}
+
+	return
+}
+func getColumnNames() (result []string) {
+
+	const index = 2
+	var alphabet = [...]string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+		"N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
+
+	for _, liter := range alphabet {
+		result = append(result, fmt.Sprintf("%s%d", liter, index))
+	}
+
+	for _, liter1 := range alphabet {
+		for _, liter2 := range alphabet {
+			result = append(result, fmt.Sprintf("%s%s%d", liter1, liter2, index))
+		}
+	}
+
+	return
+
+}
+
+// Columns получает все колонки вопросов
+func (g *GoogleSheet) Columns() (columns map[string]map[string]string, result Result) {
+
+	cells := getColumnNames()
+
+	columns = map[string]map[string]string{}
+
+	readRange := "Response!A2:ZZ2"
+	resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+	fmt.Printf("%+v\n", resp)
+
+	if err != nil {
+		result = GenError(err.Error())
+	} else {
+
+		for index, val := range resp.Values[0] {
+			fmt.Println(index)
+			if len(cells) > index+1 {
+				fmt.Printf("%s - %s: %s\n", cells[index], cells[index+1], fmt.Sprintf("%s", val))
+			}
+		}
+		result.Result = true
+	}
 
 	return
 }
