@@ -94,9 +94,8 @@ func (g *GoogleSheet) Keys() (keys map[int]string, result Result) {
 
 	return
 }
-func getColumnNames() (result []string) {
+func getColumnNames(index int) (result []string) {
 
-	const index = 2
 	var alphabet = [...]string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
 		"N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
 
@@ -117,24 +116,75 @@ func getColumnNames() (result []string) {
 // Columns получает все колонки вопросов
 func (g *GoogleSheet) Columns() (columns map[string]map[string]string, result Result) {
 
-	cells := getColumnNames()
+	header := getColumnNames(1)
+	answers := getColumnNames(2)
 
 	columns = map[string]map[string]string{}
 
 	readRange := "Response!A2:ZZ2"
 	resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
-	fmt.Printf("%+v\n", resp)
+	//fmt.Printf("%+v\n", resp)
 
 	if err != nil {
 		result = GenError(err.Error())
 	} else {
 
+		var responseName string
 		for index, val := range resp.Values[0] {
-			fmt.Println(index)
-			if len(cells) > index+1 {
-				fmt.Printf("%s - %s: %s\n", cells[index], cells[index+1], fmt.Sprintf("%s", val))
+
+			if val == "" {
+				continue
 			}
+			if len(answers) <= (index + 1) {
+				break
+			}
+
+			// проверяем название анкеты
+			var readRange string
+
+			readRange = fmt.Sprintf("Response!%s:%s", header[index], header[index])
+			resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+			if err == nil {
+
+				if len(resp.Values) == 1 {
+					if len(resp.Values[0]) == 1 {
+						responseName = fmt.Sprintf("%s", resp.Values[0][0])
+						columns[responseName] = map[string]string{}
+					} else {
+						result = GenError(fmt.Sprintf("Не стандартный ответ длины %d response - %+v", len(resp.Values[0]), resp.Values[0]))
+						return
+					}
+				}
+
+			} else {
+				result = GenError(err.Error())
+				return
+			}
+
+			if responseName == "" {
+				result = GenError("Не удаётся найти название анкеты.")
+				return
+			}
+
+			// заполняем названия вопросов
+			/*readRange = fmt.Sprintf("Response!%s:%s", answers[index], answers[index])
+			resp, err = g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+			if err == nil && len(resp.Values) == 1 {
+
+				if len(resp.Values[0]) == 1 {
+					columns[responseName][answers[index]] = fmt.Sprintf("%s", resp.Values[0][0])
+				} else {
+					result = GenError(fmt.Sprintf("Не стандартный ответ длины %d response - %+v", len(resp.Values[0]), resp.Values[0]))
+				}
+
+			} else {
+				result = GenError(fmt.Sprintf("err - %s, response - %+v", err.Error(), resp.Values))
+				return
+			}*/
+			columns[responseName][answers[index]] = fmt.Sprintf("%s", val)
+
 		}
+
 		result.Result = true
 	}
 
