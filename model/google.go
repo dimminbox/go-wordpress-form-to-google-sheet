@@ -94,7 +94,9 @@ func (g *GoogleSheet) Keys() (keys map[int]string, result Result) {
 
 	return
 }
-func getColumnNames(index int) (result []string) {
+
+// GetColumnNames возвращает название ячеек в Google Sheet
+func GetColumnNames(index int) (result []string) {
 
 	var alphabet = [...]string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
 		"N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
@@ -116,8 +118,8 @@ func getColumnNames(index int) (result []string) {
 // Columns получает все колонки вопросов
 func (g *GoogleSheet) Columns() (columns map[string]map[string]string, result Result) {
 
-	header := getColumnNames(1)
-	answers := getColumnNames(2)
+	header := GetColumnNames(1)
+	answers := GetColumnNames(2)
 
 	columns = map[string]map[string]string{}
 

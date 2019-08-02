@@ -1,5 +1,6 @@
 package model
 
+//Result - структура для хранения результата
 type Result struct {
 	Error  string
 	Result bool

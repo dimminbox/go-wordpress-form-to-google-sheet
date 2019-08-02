@@ -9,7 +9,10 @@ import (
 	"github.com/jinzhu/gorm"
 )
 
+// DB - экземпляр БД
 var DB *gorm.DB
+
+// Connect - соединение с БД
 var Connect *gorm.DB
 
 //Configuration - структура конфигурации микросервиса
