@@ -12,6 +12,9 @@ import (
 // KeyName - ключевое поле в опроснике по которому все они сводятся
 const KeyName = "Номер моб. телефона"
 
+// TableHead тип для заголовка таблицы
+type TableHead map[string][]string
+
 func main() {
 
 	model.InitDB()
@@ -46,26 +49,32 @@ func main() {
 				break
 			}
 
-			var wpColumns map[string]map[string]string
+			var wpColumns map[string][]string
 			wpColumns, result = getWPColumns()
 			if !result.Result {
 				fmt.Println(result.Error)
 				break
 			}
-			fmt.Printf("%+v\n", wpColumns)
-			break
+			fmt.Printf("WP Columns %+v\n\n", wpColumns)
 
 			// получаем стобцы из Google
-			var googleColumns map[string]map[string]string
+			var googleColumns map[string][]string
 			googleColumns, result = google.Columns()
 			if !result.Result {
 				fmt.Println(result.Error)
 				break
 			}
-			fmt.Printf("%+v\n", googleColumns)
+			fmt.Printf("Google columns %+v\n\n", googleColumns)
+
+			// приводим структуру таблицы в Google к виду из Wordpress
+			// убираем лишние колонки, добавляем нужные
+			makeGoogleColumns(google, wpColumns, googleColumns)
+			//fmt.Printf("%+v", actions)
+			return
 
 			// получаем новые анкеты
-			getNewResponses(keys)
+			responses := getNewResponses(keys)
+			fmt.Printf("Response %+v\n", responses)
 
 			checkSumOrig = Checksum
 		}
@@ -77,15 +86,15 @@ func main() {
 
 }
 
-func getWPColumns() (columns map[string]map[string]string, result model.Result) {
+func getWPColumns() (columns map[string][]string, result model.Result) {
 
 	excTypes := []string{"verification", "secret", "submit", "section", "fieldset"}
 
-	columns = map[string]map[string]string{}
+	columns = map[string][]string{}
 
 	config := model.Configure()
 
-	googleCells := model.GetColumnNames(2)
+	//googleCells := model.GetColumnNames(2)
 	var entries []model.FormEntry
 	model.Connect.Find(&entries)
 
@@ -100,7 +109,7 @@ func getWPColumns() (columns map[string]map[string]string, result model.Result) 
 			return
 		}
 
-		columns[form.Title] = map[string]string{}
+		columns[form.Title] = []string{}
 
 		out, err := exec.Command(config.PhpPath, "-r", "print json_encode(unserialize(\x22"+strings.Replace(entry.Data, "\x22", "\\x22", -1)+"\x22));").Output()
 		if err != nil {
@@ -117,7 +126,7 @@ func getWPColumns() (columns map[string]map[string]string, result model.Result) 
 		var answerOptions []model.AnswerOption
 		json.Unmarshal([]byte(jsonOut), &answerOptions)
 
-		for index, answerOption := range answerOptions {
+		for _, answerOption := range answerOptions {
 
 			validType := true
 			for _, typeName := range excTypes {
@@ -129,7 +138,7 @@ func getWPColumns() (columns map[string]map[string]string, result model.Result) 
 			}
 
 			if validType {
-				columns[form.Title][googleCells[index]] = answerOption.Name
+				columns[form.Title] = append(columns[form.Title], answerOption.Name)
 			}
 
 		}
@@ -140,6 +149,126 @@ func getWPColumns() (columns map[string]map[string]string, result model.Result) 
 
 	return
 
+}
+func makeCellNames() (result []string) {
+
+	for i := 0; i < 26; i++ {
+		result = append(result, string('A'-1+i)+"1")
+	}
+
+	for i := 0; i < 26; i++ {
+		for j := 0; j < 26; j++ {
+			result = append(result, fmt.Sprintf("%s%s1", string('A'-1+i), string('A'-1+j)))
+		}
+	}
+
+	return
+}
+
+// GoogleAction структура для хранения действия по Google таблице
+type GoogleAction struct {
+	Action      string //insert, delete
+	Title       string //column, group
+	Name        string //название группы, колонки
+	IndexDelete int64  //номер колонки для удаления
+	IndexStart  int64  //номер колонки после которой нужно добавить
+}
+
+func makeGoogleColumns(google model.GoogleSheet, wpColumns map[string][]string, googleColumns TableHead) (actions []GoogleAction, result model.Result) {
+
+	// проходимся по колонкам из Google для удаления колонок
+	for title, response := range googleColumns {
+
+		// если нет анкеты то удаляем все колонки
+		if _, ok := wpColumns[title]; !ok {
+
+			for index := range response {
+				actions = append(actions, GoogleAction{Action: "delete", Title: "column", IndexDelete: int64(index)})
+			}
+
+			// в Google существует анкета которой нет в WP
+			actions = append(actions, GoogleAction{Action: "delete", Title: "group", Name: title})
+
+		} else {
+
+			// пробегаемся по всем колонкам в гугле и отмечаем те которых нет в WP
+			for index, googleColumn := range response {
+				var isset bool
+				for _, wpColumn := range wpColumns[title] {
+					if googleColumn == wpColumn {
+						isset = true
+						break
+					}
+				}
+
+				if !isset {
+					actions = append(actions, GoogleAction{Action: "delete", Title: "column", IndexDelete: int64(index)})
+				}
+			}
+
+		}
+
+	}
+	// проходимся по колонкам из WP для добавления колонок в Google
+	for title, response := range wpColumns {
+
+		for _, wpColumn := range response {
+
+			if googleAnswers, ok := googleColumns[title]; !ok {
+				// добавляем колонку новой анкеты
+				actions = append(actions, GoogleAction{Action: "insert", Title: "column", Name: wpColumn, IndexStart: int64(len(googleAnswers))})
+			} else {
+
+				// проверям на то что колонка новая в анкете
+				var isset bool
+				for _, googleAnswer := range googleAnswers {
+					if wpColumn == googleAnswer {
+						isset = true
+						break
+					}
+				}
+
+				// добавляем новую колонку в текущей анкете
+				if !isset {
+					actions = append(actions, GoogleAction{Action: "insert", Title: "column", Name: wpColumn, IndexStart: int64(len(googleAnswers))})
+				}
+
+			}
+		}
+
+		if _, ok := googleColumns[title]; !ok {
+			//в Google не существует анкеты
+			actions = append(actions, GoogleAction{Action: "insert", Title: "group", Name: title})
+		}
+
+	}
+
+	// разбираемся с анкетами
+	/*for _, action := range actions {
+		if action.Action == "insert" && action.Title == "group" {
+			google.GroupInsert(action.Name)
+		}
+	}*/
+
+	// разбираемся с колонками
+	for _, action := range actions {
+		if action.Title == "column" {
+			switch action.Action {
+			case "delete":
+				columnToDelete := []int64{int64(action.IndexDelete)}
+				google.ColumnDelete(columnToDelete)
+			case "insert":
+				fmt.Printf("%+v", action)
+				result = google.ColumnInsert(action.Name, action.IndexStart)
+				fmt.Printf("%+v", result)
+				return
+
+			}
+		}
+	}
+
+	result.Result = true
+	return
 }
 
 func getNewResponses(keys map[int]string) (answerOptionNew [][]model.AnswerOption) {
