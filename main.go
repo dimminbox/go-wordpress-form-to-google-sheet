@@ -55,7 +55,7 @@ func main() {
 				fmt.Println(result.Error)
 				break
 			}
-			fmt.Printf("WP Columns %+v\n\n", wpColumns)
+			//fmt.Printf("WP Columns %+v\n\n", wpColumns)
 
 			// получаем стобцы из Google
 			var googleColumns map[string][]string
@@ -68,8 +68,13 @@ func main() {
 
 			// приводим структуру таблицы в Google к виду из Wordpress
 			// убираем лишние колонки, добавляем нужные
+
+			googleColumns, result = google.Columns()
+			if !result.Result {
+				fmt.Println(result.Error)
+				break
+			}
 			makeGoogleColumns(google, wpColumns, googleColumns)
-			//fmt.Printf("%+v", actions)
 			return
 
 			// получаем новые анкеты
@@ -168,26 +173,70 @@ func makeCellNames() (result []string) {
 // GoogleAction структура для хранения действия по Google таблице
 type GoogleAction struct {
 	Action      string //insert, delete
-	Title       string //column, group
-	Name        string //название группы, колонки
+	Type        string //column, group
+	NameColumn  string //название колонки
+	NameGroup   string //название группы
 	IndexDelete int64  //номер колонки для удаления
-	IndexStart  int64  //номер колонки после которой нужно добавить
+	IndexStart  int64  //номер колонки относительно которой нужно вставить данные
+
 }
 
-func makeGoogleColumns(google model.GoogleSheet, wpColumns map[string][]string, googleColumns TableHead) (actions []GoogleAction, result model.Result) {
+func columnsWasDifferents(wpColumns TableHead, googleColumns TableHead) (result bool) {
+
+	for title, response := range wpColumns {
+
+		if googleAnswers, ok := googleColumns[title]; !ok {
+			result = true
+			return
+		} else {
+
+			for _, wpColumn := range response {
+
+				// проверям на то что колонка новая в анкете
+				var isset bool
+				for _, googleAnswer := range googleAnswers {
+					if wpColumn == googleAnswer {
+						isset = true
+						break
+					}
+				}
+				if !isset {
+					result = true
+					return
+				}
+
+			}
+		}
+	}
+
+	return
+
+}
+func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColumns TableHead) (actions []GoogleAction, result model.Result) {
+
+	if columnsWasDifferents(wpColumns, googleColumns) {
+
+		var count int64
+		for _, items := range googleColumns {
+
+			count += int64(len(items))
+		}
+
+		result = google.ColumnDelete(count)
+		fmt.Printf("%+v", result)
+	}
 
 	// проходимся по колонкам из Google для удаления колонок
-	for title, response := range googleColumns {
+	/*for title, response := range googleColumns {
 
 		// если нет анкеты то удаляем все колонки
 		if _, ok := wpColumns[title]; !ok {
 
 			for index := range response {
-				actions = append(actions, GoogleAction{Action: "delete", Title: "column", IndexDelete: int64(index)})
+				actions = append(actions, GoogleAction{Action: "delete", Type: "column", IndexDelete: int64(index)})
 			}
-
 			// в Google существует анкета которой нет в WP
-			actions = append(actions, GoogleAction{Action: "delete", Title: "group", Name: title})
+			//actions = append(actions, GoogleAction{Action: "delete", Type: "group", Name: title})
 
 		} else {
 
@@ -202,22 +251,37 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns map[string][]string, 
 				}
 
 				if !isset {
-					actions = append(actions, GoogleAction{Action: "delete", Title: "column", IndexDelete: int64(index)})
+					actions = append(actions, GoogleAction{Action: "delete", Type: "column", IndexDelete: int64(index)})
 				}
 			}
 
 		}
 
+	}*/
+
+	// вычисление последнего столбца для добавления новых анкет в самый конец если таково будет нужно
+	var lastGoogleColumn int64
+	for title := range googleColumns {
+		lastGoogleColumn += int64(len(googleColumns[title]))
 	}
+
+	var offset int64
+
 	// проходимся по колонкам из WP для добавления колонок в Google
 	for title, response := range wpColumns {
 
-		for _, wpColumn := range response {
+		if googleAnswers, ok := googleColumns[title]; !ok {
 
-			if googleAnswers, ok := googleColumns[title]; !ok {
-				// добавляем колонку новой анкеты
-				actions = append(actions, GoogleAction{Action: "insert", Title: "column", Name: wpColumn, IndexStart: int64(len(googleAnswers))})
-			} else {
+			//в Google не существует анкеты
+			actions = append(actions, GoogleAction{Action: "insert", NameGroup: title, Type: "group", IndexStart: (lastGoogleColumn + offset)})
+			for _, wpColumn := range response {
+				actions = append(actions, GoogleAction{Action: "insert", Type: "column", NameColumn: wpColumn, IndexStart: (lastGoogleColumn + offset)})
+				offset++
+			}
+
+		} else {
+
+			for _, wpColumn := range response {
 
 				// проверям на то что колонка новая в анкете
 				var isset bool
@@ -228,42 +292,54 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns map[string][]string, 
 					}
 				}
 
+				var startColumn int64
+				for googleColumn := range googleColumns {
+
+					if title == googleColumn {
+						startColumn += int64(len(googleColumns[googleColumn]))
+						break
+					} else {
+						startColumn += int64(len(googleColumns[googleColumn]))
+					}
+				}
+
 				// добавляем новую колонку в текущей анкете
 				if !isset {
-					actions = append(actions, GoogleAction{Action: "insert", Title: "column", Name: wpColumn, IndexStart: int64(len(googleAnswers))})
+					actions = append(actions, GoogleAction{Action: "insert", Type: "column", NameColumn: wpColumn, IndexStart: startColumn})
 				}
 
 			}
-		}
 
-		if _, ok := googleColumns[title]; !ok {
-			//в Google не существует анкеты
-			actions = append(actions, GoogleAction{Action: "insert", Title: "group", Name: title})
 		}
 
 	}
 
-	// разбираемся с анкетами
-	/*for _, action := range actions {
-		if action.Action == "insert" && action.Title == "group" {
-			google.GroupInsert(action.Name)
-		}
-	}*/
-
 	// разбираемся с колонками
+	fmt.Printf("%+v\n\n", actions)
+	//return
 	for _, action := range actions {
-		if action.Title == "column" {
+		if action.Type == "column" {
 			switch action.Action {
-			case "delete":
-				columnToDelete := []int64{int64(action.IndexDelete)}
-				google.ColumnDelete(columnToDelete)
+
+			/*case "delete":
+			columnToDelete := []int64{int64(action.IndexDelete)}
+			google.ColumnDelete(columnToDelete)*/
+
 			case "insert":
-				fmt.Printf("%+v", action)
-				result = google.ColumnInsert(action.Name, action.IndexStart)
-				fmt.Printf("%+v", result)
-				return
+				fmt.Printf("%+v\n", action)
+				result = google.ColumnInsert(action.NameColumn, action.IndexStart)
+				//fmt.Printf("%+v", result)
+				//return
 
 			}
+		} else if action.Type == "group" {
+
+			fmt.Printf("%+v", action)
+			if action.Action == "insert" {
+				result = google.GroupInsert(action.NameGroup, action.IndexStart)
+				fmt.Printf("%+v", result)
+			}
+
 		}
 	}
 

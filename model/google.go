@@ -122,44 +122,45 @@ func (g *GoogleSheet) Columns() (columns map[string][]string, result Result) {
 
 		var responseName string
 
-		for index, val := range resp.Values[0] {
+		if len(resp.Values) == 1 {
+			for index, val := range resp.Values[0] {
 
-			if val == "" {
-				continue
-			}
-			if len(answers) <= (index + 1) {
-				break
-			}
-
-			// проверяем название анкеты
-			var readRange string
-
-			readRange = fmt.Sprintf("Response!%s:%s", header[index], header[index])
-			resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
-			if err == nil {
-
-				if len(resp.Values) == 1 {
-					if len(resp.Values[0]) == 1 {
-						responseName = fmt.Sprintf("%s", resp.Values[0][0])
-						columns[responseName] = []string{}
-					} else {
-						result = GenError(fmt.Sprintf("Не стандартный ответ длины %d response - %+v", len(resp.Values[0]), resp.Values[0]))
-						return
-					}
+				if val == "" {
+					continue
+				}
+				if len(answers) <= (index + 1) {
+					break
 				}
 
-			} else {
-				result = GenError(err.Error())
-				return
+				// проверяем название анкеты
+				var readRange string
+
+				readRange = fmt.Sprintf("Response!%s:%s", header[index], header[index])
+				resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
+				if err == nil {
+
+					if len(resp.Values) == 1 {
+						if len(resp.Values[0]) == 1 {
+							responseName = fmt.Sprintf("%s", resp.Values[0][0])
+							columns[responseName] = []string{}
+						} else {
+							result = GenError(fmt.Sprintf("Не стандартный ответ длины %d response - %+v", len(resp.Values[0]), resp.Values[0]))
+							return
+						}
+					}
+
+				} else {
+					result = GenError(err.Error())
+					return
+				}
+
+				if responseName == "" {
+					result = GenError("Не удаётся найти название анкеты.")
+				} else {
+					columns[responseName] = append(columns[responseName], fmt.Sprintf("%s", val))
+				}
+
 			}
-
-			if responseName == "" {
-				result = GenError("Не удаётся найти название анкеты.")
-				return
-			}
-
-			columns[responseName] = append(columns[responseName], fmt.Sprintf("%s", val))
-
 		}
 
 		result.Result = true
@@ -169,29 +170,52 @@ func (g *GoogleSheet) Columns() (columns map[string][]string, result Result) {
 }
 
 // ColumnDelete удаляет столбец
-func (g *GoogleSheet) ColumnDelete(indexes []int64) (result Result) {
+func (g *GoogleSheet) ColumnDelete(limit int64) (result Result) {
 
 	var requests []*sheets.Request
+	var req sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
+	var err error
 
-	for _, index := range indexes {
-
-		req := sheets.Request{
-			DeleteDimension: &sheets.DeleteDimensionRequest{
-				Range: &sheets.DimensionRange{
-					Dimension:  "COLUMNS",
-					SheetId:    0,
-					StartIndex: index,
-					EndIndex:   (index + 1),
-				},
+	req = sheets.Request{
+		InsertDimension: &sheets.InsertDimensionRequest{
+			Range: &sheets.DimensionRange{
+				Dimension:  "COLUMNS",
+				SheetId:    0,
+				StartIndex: limit + 1,
+				EndIndex:   limit + 2,
 			},
-		}
-		requests = append(requests, &req)
+			InheritFromBefore: true,
+		},
 	}
 
-	buRequest := &sheets.BatchUpdateSpreadsheetRequest{
+	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*sheets.Request{&req},
+	}
+
+	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+
+	if err != nil {
+		result = GenError(err.Error())
+		return
+	}
+
+	req = sheets.Request{
+		DeleteDimension: &sheets.DeleteDimensionRequest{
+			Range: &sheets.DimensionRange{
+				Dimension:  "COLUMNS",
+				SheetId:    0,
+				StartIndex: 0,
+				EndIndex:   limit,
+			},
+		},
+	}
+	requests = append(requests, &req)
+
+	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
 		Requests: requests,
 	}
-	_, err := g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
 
 	if err != nil {
 		result = GenError(err.Error())
@@ -200,7 +224,51 @@ func (g *GoogleSheet) ColumnDelete(indexes []int64) (result Result) {
 }
 
 // GroupInsert добавляет название анкеты
-func (g *GoogleSheet) GroupInsert(name string) (result Result) {
+func (g *GoogleSheet) GroupInsert(name string, start int64) (result Result) {
+
+	var err error
+	var req sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
+
+	/*if start > 0 {
+		start--
+	}*/
+
+	req = sheets.Request{
+		UpdateCells: &sheets.UpdateCellsRequest{
+			Range: &sheets.GridRange{
+				StartRowIndex:    0,
+				EndRowIndex:      1,
+				StartColumnIndex: start,
+				EndColumnIndex:   start + 1,
+				SheetId:          0,
+			},
+			Rows: []*sheets.RowData{
+				&sheets.RowData{
+					Values: []*sheets.CellData{
+						&sheets.CellData{
+							UserEnteredValue: &sheets.ExtendedValue{
+								StringValue: name,
+							},
+						},
+					},
+				},
+			},
+			Fields: "*",
+		},
+	}
+	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*sheets.Request{&req},
+	}
+
+	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+
+	if err != nil {
+		result = GenError(err.Error())
+		return
+	}
+
+	result.Result = true
 	return
 }
 
@@ -209,19 +277,20 @@ func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
 
 	var err error
 	var req sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
 
 	req = sheets.Request{
 		InsertDimension: &sheets.InsertDimensionRequest{
 			Range: &sheets.DimensionRange{
 				Dimension:  "COLUMNS",
 				SheetId:    0,
-				StartIndex: 1,
-				EndIndex:   2,
+				StartIndex: start + 1,
+				EndIndex:   start + 2,
 			},
+			InheritFromBefore: true,
 		},
 	}
 
-	var buRequest *sheets.BatchUpdateSpreadsheetRequest
 	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
 		Requests: []*sheets.Request{&req},
 	}
@@ -239,10 +308,21 @@ func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
 				StartRowIndex:    1,
 				EndRowIndex:      2,
 				StartColumnIndex: start,
-				EndColumnIndex:   (start + 1),
+				EndColumnIndex:   start + 1,
 				SheetId:          0,
 			},
-			Fields: name,
+			Rows: []*sheets.RowData{
+				&sheets.RowData{
+					Values: []*sheets.CellData{
+						&sheets.CellData{
+							UserEnteredValue: &sheets.ExtendedValue{
+								StringValue: name,
+							},
+						},
+					},
+				},
+			},
+			Fields: "*",
 		},
 	}
 	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
@@ -256,6 +336,7 @@ func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
 		return
 	}
 
+	result.Result = true
 	return
 }
 
