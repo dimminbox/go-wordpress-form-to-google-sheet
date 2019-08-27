@@ -55,7 +55,7 @@ func main() {
 				fmt.Println(result.Error)
 				break
 			}
-			//fmt.Printf("WP Columns %+v\n\n", wpColumns)
+			fmt.Printf("WP Columns %+v\n\n", wpColumns)
 
 			// получаем стобцы из Google
 			var googleColumns map[string][]string
@@ -212,52 +212,23 @@ func columnsWasDifferents(wpColumns TableHead, googleColumns TableHead) (result 
 	return
 
 }
-func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColumns TableHead) (actions []GoogleAction, result model.Result) {
+func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColumns TableHead) (result model.Result) {
 
+	var actions []GoogleAction
 	if columnsWasDifferents(wpColumns, googleColumns) {
 
-		var count int64
-		for _, items := range googleColumns {
-
-			count += int64(len(items))
+		// удаляем вкладку
+		result = google.SheetRemove()
+		if !result.Result {
+			return
 		}
 
-		result = google.ColumnDelete(count)
-		fmt.Printf("%+v", result)
+		//  Добавляем вкладку и устнавливаем её рабочей
+		result = google.Init()
+		if !result.Result {
+			return
+		}
 	}
-
-	// проходимся по колонкам из Google для удаления колонок
-	/*for title, response := range googleColumns {
-
-		// если нет анкеты то удаляем все колонки
-		if _, ok := wpColumns[title]; !ok {
-
-			for index := range response {
-				actions = append(actions, GoogleAction{Action: "delete", Type: "column", IndexDelete: int64(index)})
-			}
-			// в Google существует анкета которой нет в WP
-			//actions = append(actions, GoogleAction{Action: "delete", Type: "group", Name: title})
-
-		} else {
-
-			// пробегаемся по всем колонкам в гугле и отмечаем те которых нет в WP
-			for index, googleColumn := range response {
-				var isset bool
-				for _, wpColumn := range wpColumns[title] {
-					if googleColumn == wpColumn {
-						isset = true
-						break
-					}
-				}
-
-				if !isset {
-					actions = append(actions, GoogleAction{Action: "delete", Type: "column", IndexDelete: int64(index)})
-				}
-			}
-
-		}
-
-	}*/
 
 	// вычисление последнего столбца для добавления новых анкет в самый конец если таково будет нужно
 	var lastGoogleColumn int64
@@ -315,29 +286,26 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColu
 	}
 
 	// разбираемся с колонками
-	fmt.Printf("%+v\n\n", actions)
-	//return
 	for _, action := range actions {
 		if action.Type == "column" {
 			switch action.Action {
 
-			/*case "delete":
-			columnToDelete := []int64{int64(action.IndexDelete)}
-			google.ColumnDelete(columnToDelete)*/
-
 			case "insert":
-				fmt.Printf("%+v\n", action)
 				result = google.ColumnInsert(action.NameColumn, action.IndexStart)
-				//fmt.Printf("%+v", result)
-				//return
-
+				if !result.Result {
+					fmt.Printf("%+v\n", result)
+					return
+				}
 			}
+
 		} else if action.Type == "group" {
 
-			fmt.Printf("%+v", action)
 			if action.Action == "insert" {
 				result = google.GroupInsert(action.NameGroup, action.IndexStart)
-				fmt.Printf("%+v", result)
+				if !result.Result {
+					fmt.Printf("%+v\n", result)
+					return
+				}
 			}
 
 		}

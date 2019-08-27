@@ -18,7 +18,10 @@ import (
 type GoogleSheet struct {
 	Spreadsheet string
 	Service     *sheets.Service
+	SheetID     int64
 }
+
+const workTab = "Response"
 
 /*func (g *GoogleSheet) Write() (result Result) {
 	row := 1
@@ -49,14 +52,21 @@ func (g *GoogleSheet) Init() (result Result) {
 	config, err := google.ConfigFromJSON(data, "https://www.googleapis.com/auth/spreadsheets")
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to config: %v", err)
+		return
 	}
+
 	client := g.getClient(config)
 
 	g.Service, err = sheets.New(client)
 	if err != nil {
 		log.Fatalf("Unable to retrieve Sheets client: %v", err)
-	} else {
-		result.Result = true
+		return
+	}
+
+	result = g.sheetSet()
+
+	if g.SheetID == 0 {
+		result = g.SheetAdd()
 	}
 
 	return
@@ -67,7 +77,7 @@ func (g *GoogleSheet) Keys() (keys map[int]string, result Result) {
 
 	keys = map[int]string{}
 
-	readRange := "Response!A1:A1000000"
+	readRange := fmt.Sprintf("%s!A1:A1000000", workTab)
 	resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
 
 	if err != nil {
@@ -169,6 +179,89 @@ func (g *GoogleSheet) Columns() (columns map[string][]string, result Result) {
 	return
 }
 
+// sheetSet устанавливает ID вкладки по названию
+func (g *GoogleSheet) sheetSet() (result Result) {
+
+	var err error
+	resp, err := g.Service.Spreadsheets.Get(g.Spreadsheet).Do()
+	if err != nil {
+		result = GenError(err.Error())
+		return
+	}
+
+	for _, sheet := range resp.Sheets {
+		if sheet.Properties.Title == workTab {
+			g.SheetID = sheet.Properties.SheetId
+			result.Result = true
+			return
+		}
+	}
+
+	return
+}
+
+// SheetRemove удаляет вкладку
+func (g *GoogleSheet) SheetRemove() (result Result) {
+
+	var req sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
+	var err error
+
+	if g.SheetID == 0 {
+		result.Result = true
+		return
+	}
+
+	req = sheets.Request{
+		DeleteSheet: &sheets.DeleteSheetRequest{
+			SheetId: g.SheetID,
+		},
+	}
+
+	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*sheets.Request{&req},
+	}
+
+	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+
+	if err != nil {
+		result = GenError(err.Error())
+		return
+	}
+
+	return
+}
+
+// SheetAdd добавляет вкладку
+func (g *GoogleSheet) SheetAdd() (result Result) {
+
+	var req sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
+	var err error
+
+	req = sheets.Request{
+		AddSheet: &sheets.AddSheetRequest{
+			Properties: &sheets.SheetProperties{
+				Index: 0,
+				Title: workTab,
+			},
+		},
+	}
+
+	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*sheets.Request{&req},
+	}
+
+	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+
+	if err != nil {
+		result = GenError(err.Error())
+		return
+	}
+	result.Result = true
+	return
+}
+
 // ColumnDelete удаляет столбец
 func (g *GoogleSheet) ColumnDelete(limit int64) (result Result) {
 
@@ -181,7 +274,7 @@ func (g *GoogleSheet) ColumnDelete(limit int64) (result Result) {
 		InsertDimension: &sheets.InsertDimensionRequest{
 			Range: &sheets.DimensionRange{
 				Dimension:  "COLUMNS",
-				SheetId:    0,
+				SheetId:    g.SheetID,
 				StartIndex: limit + 1,
 				EndIndex:   limit + 2,
 			},
@@ -204,7 +297,7 @@ func (g *GoogleSheet) ColumnDelete(limit int64) (result Result) {
 		DeleteDimension: &sheets.DeleteDimensionRequest{
 			Range: &sheets.DimensionRange{
 				Dimension:  "COLUMNS",
-				SheetId:    0,
+				SheetId:    g.SheetID,
 				StartIndex: 0,
 				EndIndex:   limit,
 			},
@@ -241,7 +334,7 @@ func (g *GoogleSheet) GroupInsert(name string, start int64) (result Result) {
 				EndRowIndex:      1,
 				StartColumnIndex: start,
 				EndColumnIndex:   start + 1,
-				SheetId:          0,
+				SheetId:          g.SheetID,
 			},
 			Rows: []*sheets.RowData{
 				&sheets.RowData{
@@ -283,7 +376,7 @@ func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
 		InsertDimension: &sheets.InsertDimensionRequest{
 			Range: &sheets.DimensionRange{
 				Dimension:  "COLUMNS",
-				SheetId:    0,
+				SheetId:    g.SheetID,
 				StartIndex: start + 1,
 				EndIndex:   start + 2,
 			},
@@ -309,7 +402,7 @@ func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
 				EndRowIndex:      2,
 				StartColumnIndex: start,
 				EndColumnIndex:   start + 1,
-				SheetId:          0,
+				SheetId:          g.SheetID,
 			},
 			Rows: []*sheets.RowData{
 				&sheets.RowData{
