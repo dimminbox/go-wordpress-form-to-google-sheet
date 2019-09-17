@@ -118,6 +118,7 @@ func getWPColumns() (columns map[string][]string, result model.Result) {
 		var form model.Form
 		model.Connect.
 			Where("form_id = ?", entry.FormID).
+			Order("form_id DESC").
 			Find(&form)
 		if form.FormID == 0 {
 			result = model.GenError(fmt.Sprintf("Для опросника %d не найдена форма.\n", entry.ID))
@@ -313,7 +314,10 @@ func responsesNew(keys map[int]string) (result map[string][]model.AnswerOption) 
 	//var answerOptionNew []model.AnswerOption
 
 	var entries []model.FormEntry
-	model.Connect.Find(&entries)
+	model.Connect.
+		Where("entry_approved = ?", 1).
+		Order("form_id DESC").
+		Find(&entries)
 
 	var uniqKey string
 	for _, entry := range entries {
