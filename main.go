@@ -66,7 +66,7 @@ func main() {
 				fmt.Println(result.Error)
 				break
 			}
-			fmt.Printf("WP Columns %+v\n\n", wpColumns)
+			//fmt.Printf("WP Columns %+v\n\n", wpColumns)
 
 			// получаем стобцы из Google
 			var googleColumns map[string][]string
@@ -274,6 +274,7 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColu
 
 	}
 
+	fmt.Printf("%+v", actions)
 	// разбираемся с колонками
 	for _, action := range actions {
 		if action.Type == "column" {
