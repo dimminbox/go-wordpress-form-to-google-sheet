@@ -86,11 +86,12 @@ func main() {
 				break
 			}
 			result = makeGoogleColumns(google, wpColumns, googleColumns)
-
+			fmt.Printf("%+v", result)
 			// получаем анкеты из WP
 			responses := responsesNew(keys)
 
 			result = addGoogleResults(google, keys, responses)
+			fmt.Printf("%+v", result)
 
 			checkSumOrig = Checksum
 		}
@@ -386,7 +387,7 @@ func addGoogleResults(google model.GoogleSheet, keys map[int]string, responses m
 		}
 	}
 	fmt.Printf("%+v", responses)
-	google.RowsInsert(keys, responses)
+	result = google.RowsInsert(keys, responses)
 
 	return
 }
