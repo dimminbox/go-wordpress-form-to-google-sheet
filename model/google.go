@@ -323,10 +323,6 @@ func (g *GoogleSheet) GroupInsert(name string, start int64) (result Result) {
 	var req sheets.Request
 	var buRequest *sheets.BatchUpdateSpreadsheetRequest
 
-	/*if start > 0 {
-		start--
-	}*/
-
 	req = sheets.Request{
 		UpdateCells: &sheets.UpdateCellsRequest{
 			Range: &sheets.GridRange{
@@ -427,6 +423,72 @@ func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
 	if err != nil {
 		result = GenError(err.Error())
 		return
+	}
+
+	result.Result = true
+	return
+}
+
+// RowsInsert добавляет строки
+func (g *GoogleSheet) RowsInsert(keys map[int]string, data map[string][]AnswerOption) (result Result) {
+
+	var offset int64 = 2
+	var firstRow int64
+	for key := range keys {
+		_key := int64(key)
+		if _key > firstRow {
+			firstRow = _key
+		}
+	}
+
+	var err error
+	var reqs []*sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
+
+	var row int64
+	for _, answers := range data {
+		for column, answer := range answers {
+
+			reqs = append(reqs, &sheets.Request{
+				UpdateCells: &sheets.UpdateCellsRequest{
+					Range: &sheets.GridRange{
+						StartRowIndex:    firstRow + row + offset,
+						EndRowIndex:      firstRow + row + offset + 1,
+						StartColumnIndex: int64(column),
+						EndColumnIndex:   int64(column + 1),
+						SheetId:          g.SheetID,
+					},
+					Rows: []*sheets.RowData{
+						&sheets.RowData{
+							Values: []*sheets.CellData{
+								&sheets.CellData{
+									UserEnteredValue: &sheets.ExtendedValue{
+										StringValue: answer.Value,
+									},
+								},
+							},
+						},
+					},
+					Fields: "*",
+				},
+			})
+
+		}
+		row++
+	}
+
+	if len(reqs) > 0 {
+
+		buRequest = &sheets.BatchUpdateSpreadsheetRequest{
+			Requests: reqs,
+		}
+
+		_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+
+		if err != nil {
+			result = GenError(err.Error())
+		}
+
 	}
 
 	result.Result = true

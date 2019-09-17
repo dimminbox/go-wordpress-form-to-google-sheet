@@ -15,6 +15,17 @@ const KeyName = "Номер моб. телефона"
 // TableHead тип для заголовка таблицы
 type TableHead map[string][]string
 
+// GoogleAction структура для хранения действия по Google таблице
+type GoogleAction struct {
+	Action      string //insert, delete
+	Type        string //column, group
+	NameColumn  string //название колонки
+	NameGroup   string //название группы
+	IndexDelete int64  //номер колонки для удаления
+	IndexStart  int64  //номер колонки относительно которой нужно вставить данные
+
+}
+
 func main() {
 
 	model.InitDB()
@@ -64,7 +75,7 @@ func main() {
 				fmt.Println(result.Error)
 				break
 			}
-			fmt.Printf("Google columns %+v\n\n", googleColumns)
+			//fmt.Printf("Google columns %+v\n\n", googleColumns)
 
 			// приводим структуру таблицы в Google к виду из Wordpress
 			// убираем лишние колонки, добавляем нужные
@@ -74,12 +85,12 @@ func main() {
 				fmt.Println(result.Error)
 				break
 			}
-			makeGoogleColumns(google, wpColumns, googleColumns)
-			return
+			result = makeGoogleColumns(google, wpColumns, googleColumns)
 
-			// получаем новые анкеты
-			responses := getNewResponses(keys)
-			fmt.Printf("Response %+v\n", responses)
+			// получаем анкеты из WP
+			responses := responsesNew(keys)
+
+			result = addGoogleResults(google, keys, responses)
 
 			checkSumOrig = Checksum
 		}
@@ -92,8 +103,6 @@ func main() {
 }
 
 func getWPColumns() (columns map[string][]string, result model.Result) {
-
-	excTypes := []string{"verification", "secret", "submit", "section", "fieldset"}
 
 	columns = map[string][]string{}
 
@@ -132,17 +141,7 @@ func getWPColumns() (columns map[string][]string, result model.Result) {
 		json.Unmarshal([]byte(jsonOut), &answerOptions)
 
 		for _, answerOption := range answerOptions {
-
-			validType := true
-			for _, typeName := range excTypes {
-
-				if answerOption.TypeName == typeName {
-					validType = false
-					break
-				}
-			}
-
-			if validType {
+			if answerOption.Usefull() {
 				columns[form.Title] = append(columns[form.Title], answerOption.Name)
 			}
 
@@ -168,17 +167,6 @@ func makeCellNames() (result []string) {
 	}
 
 	return
-}
-
-// GoogleAction структура для хранения действия по Google таблице
-type GoogleAction struct {
-	Action      string //insert, delete
-	Type        string //column, group
-	NameColumn  string //название колонки
-	NameGroup   string //название группы
-	IndexDelete int64  //номер колонки для удаления
-	IndexStart  int64  //номер колонки относительно которой нужно вставить данные
-
 }
 
 func columnsWasDifferents(wpColumns TableHead, googleColumns TableHead) (result bool) {
@@ -315,13 +303,17 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColu
 	return
 }
 
-func getNewResponses(keys map[int]string) (answerOptionNew [][]model.AnswerOption) {
+func responsesNew(keys map[int]string) (result map[string][]model.AnswerOption) {
+
+	result = map[string][]model.AnswerOption{}
 
 	config := model.Configure()
+	//var answerOptionNew []model.AnswerOption
 
 	var entries []model.FormEntry
 	model.Connect.Find(&entries)
 
+	var uniqKey string
 	for _, entry := range entries {
 
 		var form model.Form
@@ -347,10 +339,6 @@ func getNewResponses(keys map[int]string) (answerOptionNew [][]model.AnswerOptio
 
 				isNewAnswer := true
 				for _, answerOption := range answerOptions {
-
-					if answerOption.Name != KeyName {
-						continue
-					}
 					for _, key := range keys {
 						if key == answerOption.Value {
 							isNewAnswer = false
@@ -358,15 +346,47 @@ func getNewResponses(keys map[int]string) (answerOptionNew [][]model.AnswerOptio
 					}
 				}
 
-				if isNewAnswer {
-					answerOptionNew = append(answerOptionNew, answerOptions)
+				if !isNewAnswer {
+					continue
 				}
+				var answerOptionTotal []model.AnswerOption
+				for _, answerOption := range answerOptions {
+
+					if answerOption.Name == KeyName {
+						uniqKey = answerOption.Value
+					}
+
+					//fmt.Printf("%+v", answerOption)
+					if answerOption.Usefull() {
+						answerOptionTotal = append(answerOptionTotal, answerOption)
+					}
+
+				}
+				if len(result[uniqKey]) == 0 {
+					result[uniqKey] = []model.AnswerOption{}
+				}
+				result[uniqKey] = append(result[uniqKey], answerOptionTotal...)
 
 			}
 		} else {
 			fmt.Printf("%+v", err)
 		}
 	}
+
+	return
+}
+
+func addGoogleResults(google model.GoogleSheet, keys map[int]string, responses map[string][]model.AnswerOption) (result model.Result) {
+
+	for _, key := range keys {
+		for uniqKey := range responses {
+			if key == uniqKey {
+				delete(responses, uniqKey)
+			}
+		}
+	}
+	fmt.Printf("%+v", responses)
+	google.RowsInsert(keys, responses)
 
 	return
 }

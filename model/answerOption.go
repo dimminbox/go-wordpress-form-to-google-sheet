@@ -10,3 +10,15 @@ type AnswerOption struct {
 	ParentID string `json:"parent_id"`
 	Value    string `json:"value"`
 }
+
+// Usefull - полезнаый ли ответ
+func (a *AnswerOption) Usefull() (result bool) {
+	for _, typeName := range ExcTypes {
+
+		if a.TypeName == typeName {
+
+			return false
+		}
+	}
+	return true
+}

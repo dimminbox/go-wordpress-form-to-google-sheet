@@ -23,6 +23,8 @@ type Configuration struct {
 	PhpPath    string
 }
 
+var ExcTypes = []string{"verification", "secret", "submit", "section", "fieldset", "instructions"}
+
 var configuration Configuration
 
 // Configure - возвращает конфигурацию
