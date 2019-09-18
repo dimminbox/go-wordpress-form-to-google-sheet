@@ -15,17 +15,6 @@ const KeyName = "Номер моб. телефона"
 // TableHead тип для заголовка таблицы
 type TableHead map[string][]string
 
-// GoogleAction структура для хранения действия по Google таблице
-type GoogleAction struct {
-	Action      string //insert, delete
-	Type        string //column, group
-	NameColumn  string //название колонки
-	NameGroup   string //название группы
-	IndexDelete int64  //номер колонки для удаления
-	IndexStart  int64  //номер колонки относительно которой нужно вставить данные
-
-}
-
 func main() {
 
 	model.InitDB()
@@ -80,18 +69,18 @@ func main() {
 			// приводим структуру таблицы в Google к виду из Wordpress
 			// убираем лишние колонки, добавляем нужные
 
-			googleColumns, result = google.Columns()
+			result = makeGoogleColumns(google, wpColumns, googleColumns)
+
 			if !result.Result {
 				fmt.Println(result.Error)
 				break
-			}
-			result = makeGoogleColumns(google, wpColumns, googleColumns)
-			fmt.Printf("%+v", result)
-			// получаем анкеты из WP
-			responses := responsesNew(keys)
+			} else {
+				// получаем анкеты из WP
+				responses := responsesNew(keys)
 
-			result = addGoogleResults(google, keys, responses)
-			fmt.Printf("%+v", result)
+				result = addGoogleResults(google, keys, responses)
+				fmt.Printf("%+v", result)
+			}
 
 			checkSumOrig = Checksum
 		}
@@ -111,14 +100,16 @@ func getWPColumns() (columns map[string][]string, result model.Result) {
 
 	//googleCells := model.GetColumnNames(2)
 	var entries []model.FormEntry
-	model.Connect.Find(&entries)
+	model.Connect.
+		Where("entry_approved = ?", 1).
+		Order("form_id DESC").
+		Find(&entries)
 
 	for _, entry := range entries {
 
 		var form model.Form
 		model.Connect.
 			Where("form_id = ?", entry.FormID).
-			Order("form_id DESC").
 			Find(&form)
 		if form.FormID == 0 {
 			result = model.GenError(fmt.Sprintf("Для опросника %d не найдена форма.\n", entry.ID))
@@ -204,7 +195,9 @@ func columnsWasDifferents(wpColumns TableHead, googleColumns TableHead) (result 
 }
 func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColumns TableHead) (result model.Result) {
 
-	var actions []GoogleAction
+	var actionGroup []model.GoogleAction
+	var actionColumn []model.GoogleAction
+
 	if columnsWasDifferents(wpColumns, googleColumns) {
 
 		// удаляем вкладку
@@ -234,9 +227,9 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColu
 		if googleAnswers, ok := googleColumns[title]; !ok {
 
 			//в Google не существует анкеты
-			actions = append(actions, GoogleAction{Action: "insert", NameGroup: title, Type: "group", IndexStart: (lastGoogleColumn + offset)})
+			actionGroup = append(actionGroup, model.GoogleAction{Action: "insert", NameGroup: title, Type: "group", IndexStart: (lastGoogleColumn + offset)})
 			for _, wpColumn := range response {
-				actions = append(actions, GoogleAction{Action: "insert", Type: "column", NameColumn: wpColumn, IndexStart: (lastGoogleColumn + offset)})
+				actionColumn = append(actionColumn, model.GoogleAction{Action: "insert", Type: "column", NameColumn: wpColumn, IndexStart: (lastGoogleColumn + offset)})
 				offset++
 			}
 
@@ -266,7 +259,7 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColu
 
 				// добавляем новую колонку в текущей анкете
 				if !isset {
-					actions = append(actions, GoogleAction{Action: "insert", Type: "column", NameColumn: wpColumn, IndexStart: startColumn})
+					actionColumn = append(actionColumn, model.GoogleAction{Action: "insert", Type: "column", NameColumn: wpColumn, IndexStart: startColumn})
 				}
 
 			}
@@ -274,34 +267,19 @@ func makeGoogleColumns(google model.GoogleSheet, wpColumns TableHead, googleColu
 		}
 
 	}
-
-	fmt.Printf("%+v", actions)
-	// разбираемся с колонками
-	for _, action := range actions {
-		if action.Type == "column" {
-			switch action.Action {
-
-			case "insert":
-				result = google.ColumnInsert(action.NameColumn, action.IndexStart)
-				if !result.Result {
-					fmt.Printf("%+v\n", result)
-					return
-				}
-			}
-
-		} else if action.Type == "group" {
-
-			if action.Action == "insert" {
-				result = google.GroupInsert(action.NameGroup, action.IndexStart)
-				if !result.Result {
-					fmt.Printf("%+v\n", result)
-					return
-				}
-			}
-
+	if len(actionColumn) > 0 {
+		result = google.ColumnInsert(actionColumn)
+		if !result.Result {
+			return
 		}
 	}
 
+	if len(actionGroup) > 0 {
+		result = google.GroupInsert(actionGroup)
+		if !result.Result {
+			return
+		}
+	}
 	result.Result = true
 	return
 }

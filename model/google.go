@@ -21,23 +21,18 @@ type GoogleSheet struct {
 	SheetID     int64
 }
 
+// GoogleAction структура для хранения действия по Google таблице
+type GoogleAction struct {
+	Action      string //insert, delete
+	Type        string //column, group
+	NameColumn  string //название колонки
+	NameGroup   string //название группы
+	IndexDelete int64  //номер колонки для удаления
+	IndexStart  int64  //номер колонки относительно которой нужно вставить данные
+
+}
+
 const workTab = "Response"
-
-/*func (g *GoogleSheet) Write() (result Result) {
-	row := 1
-	column := 2
-
-	g.Sheet.Update(row, column, "22222")
-	g.Sheet.Update(3, 2, "33333")
-
-	err := g.Sheet.Synchronize()
-	if err != nil {
-		result = GenError(err.Error())
-	}
-
-	result.Result = true
-	return
-}*/
 
 // Init соединяется с Google
 func (g *GoogleSheet) Init() (result Result) {
@@ -317,37 +312,40 @@ func (g *GoogleSheet) ColumnDelete(limit int64) (result Result) {
 }
 
 // GroupInsert добавляет название анкеты
-func (g *GoogleSheet) GroupInsert(name string, start int64) (result Result) {
+func (g *GoogleSheet) GroupInsert(actions []GoogleAction) (result Result) {
 
 	var err error
-	var req sheets.Request
+	var reqs []*sheets.Request
 	var buRequest *sheets.BatchUpdateSpreadsheetRequest
 
-	req = sheets.Request{
-		UpdateCells: &sheets.UpdateCellsRequest{
-			Range: &sheets.GridRange{
-				StartRowIndex:    0,
-				EndRowIndex:      1,
-				StartColumnIndex: start,
-				EndColumnIndex:   start + 1,
-				SheetId:          g.SheetID,
-			},
-			Rows: []*sheets.RowData{
-				&sheets.RowData{
-					Values: []*sheets.CellData{
-						&sheets.CellData{
-							UserEnteredValue: &sheets.ExtendedValue{
-								StringValue: name,
+	for _, action := range actions {
+		reqs = append(reqs, &sheets.Request{
+			UpdateCells: &sheets.UpdateCellsRequest{
+				Range: &sheets.GridRange{
+					StartRowIndex:    0,
+					EndRowIndex:      1,
+					StartColumnIndex: action.IndexStart,
+					EndColumnIndex:   action.IndexStart + 1,
+					SheetId:          g.SheetID,
+				},
+				Rows: []*sheets.RowData{
+					&sheets.RowData{
+						Values: []*sheets.CellData{
+							&sheets.CellData{
+								UserEnteredValue: &sheets.ExtendedValue{
+									StringValue: action.NameGroup,
+								},
 							},
 						},
 					},
 				},
+				Fields: "*",
 			},
-			Fields: "*",
-		},
+		})
 	}
+
 	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
-		Requests: []*sheets.Request{&req},
+		Requests: reqs,
 	}
 
 	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
@@ -362,64 +360,64 @@ func (g *GoogleSheet) GroupInsert(name string, start int64) (result Result) {
 }
 
 // ColumnInsert добавляет столбец
-func (g *GoogleSheet) ColumnInsert(name string, start int64) (result Result) {
+func (g *GoogleSheet) ColumnInsert(actions []GoogleAction) (result Result) {
 
 	var err error
-	var req sheets.Request
+	var reqs []*sheets.Request
 	var buRequest *sheets.BatchUpdateSpreadsheetRequest
 
-	req = sheets.Request{
-		InsertDimension: &sheets.InsertDimensionRequest{
-			Range: &sheets.DimensionRange{
-				Dimension:  "COLUMNS",
-				SheetId:    g.SheetID,
-				StartIndex: start + 1,
-				EndIndex:   start + 2,
+	for _, action := range actions {
+		reqs = append(reqs, &sheets.Request{
+			InsertDimension: &sheets.InsertDimensionRequest{
+				Range: &sheets.DimensionRange{
+					Dimension:  "COLUMNS",
+					SheetId:    g.SheetID,
+					StartIndex: action.IndexStart + 1,
+					EndIndex:   action.IndexStart + 2,
+				},
+				InheritFromBefore: true,
 			},
-			InheritFromBefore: true,
-		},
+		})
 	}
 
 	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
-		Requests: []*sheets.Request{&req},
+		Requests: reqs,
 	}
-
 	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
-
 	if err != nil {
 		result = GenError(err.Error())
 		return
 	}
 
-	req = sheets.Request{
-		UpdateCells: &sheets.UpdateCellsRequest{
-			Range: &sheets.GridRange{
-				StartRowIndex:    1,
-				EndRowIndex:      2,
-				StartColumnIndex: start,
-				EndColumnIndex:   start + 1,
-				SheetId:          g.SheetID,
-			},
-			Rows: []*sheets.RowData{
-				&sheets.RowData{
-					Values: []*sheets.CellData{
-						&sheets.CellData{
-							UserEnteredValue: &sheets.ExtendedValue{
-								StringValue: name,
+	for _, action := range actions {
+		reqs = append(reqs, &sheets.Request{
+			UpdateCells: &sheets.UpdateCellsRequest{
+				Range: &sheets.GridRange{
+					StartRowIndex:    1,
+					EndRowIndex:      2,
+					StartColumnIndex: action.IndexStart,
+					EndColumnIndex:   action.IndexStart + 1,
+					SheetId:          g.SheetID,
+				},
+				Rows: []*sheets.RowData{
+					&sheets.RowData{
+						Values: []*sheets.CellData{
+							&sheets.CellData{
+								UserEnteredValue: &sheets.ExtendedValue{
+									StringValue: action.NameColumn,
+								},
 							},
 						},
 					},
 				},
+				Fields: "*",
 			},
-			Fields: "*",
-		},
+		})
 	}
 	buRequest = &sheets.BatchUpdateSpreadsheetRequest{
-		Requests: []*sheets.Request{&req},
+		Requests: reqs,
 	}
-
 	_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
-
 	if err != nil {
 		result = GenError(err.Error())
 		return
