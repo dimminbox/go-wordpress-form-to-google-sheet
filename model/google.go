@@ -2,6 +2,8 @@ package model
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -29,13 +31,21 @@ type GoogleAction struct {
 	NameGroup   string //название группы
 	IndexDelete int64  //номер колонки для удаления
 	IndexStart  int64  //номер колонки относительно которой нужно вставить данные
+}
 
+// GoogleRow структура для храннения данных в строке
+type GoogleRow struct {
+	Index    string
+	Checksum string
+	Data     []AnswerOption
 }
 
 const workTab = "Response"
 
 // Init соединяется с Google
 func (g *GoogleSheet) Init() (result Result) {
+
+	fmt.Println("Google Init")
 
 	var err error
 	data, err := ioutil.ReadFile("credentials.json")
@@ -59,30 +69,42 @@ func (g *GoogleSheet) Init() (result Result) {
 	}
 
 	result = g.sheetSet()
-
-	if g.SheetID == 0 {
-		result = g.SheetAdd()
+	if result.Result {
+		if g.SheetID == 0 {
+			result = g.SheetAdd()
+		}
 	}
 
 	return
 }
 
-// Keys получает все ключи записей
-func (g *GoogleSheet) Keys() (keys map[int]string, result Result) {
+// Data получает все ключи записей
+func (g *GoogleSheet) Data() (rows []GoogleRow, result Result) {
 
-	keys = map[int]string{}
-
-	readRange := fmt.Sprintf("%s!A1:A1000000", workTab)
+	fmt.Println("Google Data")
+	readRange := fmt.Sprintf("%s!A1:ZZ1000000", workTab)
 	resp, err := g.Service.Spreadsheets.Values.Get(g.Spreadsheet, readRange).Do()
 
 	if err != nil {
 		result = GenError(err.Error())
 	} else {
 
-		for i, val := range resp.Values {
+		for i, vals := range resp.Values {
+			var items string
 			if i > 1 {
-				keys[i] = fmt.Sprintf("%s", val[0])
+				for _, item := range vals {
+					items = fmt.Sprintf("%s%s", items, fmt.Sprintf("%s", item))
+				}
+
+				hasher := md5.New()
+				hasher.Write([]byte(items))
+
+				rows = append(rows, GoogleRow{
+					Index:    fmt.Sprintf("%s", vals[0]),
+					Checksum: hex.EncodeToString(hasher.Sum(nil)),
+				})
 			}
+
 		}
 		result.Result = true
 	}
@@ -112,6 +134,8 @@ func GetColumnNames(index int) (result []string) {
 
 // Columns получает все колонки вопросов
 func (g *GoogleSheet) Columns() (columns map[string][]string, result Result) {
+
+	fmt.Println("Google Columns")
 
 	header := GetColumnNames(1)
 	answers := GetColumnNames(1)
@@ -222,6 +246,8 @@ func (g *GoogleSheet) SheetRemove() (result Result) {
 	if err != nil {
 		result = GenError(err.Error())
 		return
+	} else {
+		result.Result = true
 	}
 
 	return
@@ -251,9 +277,9 @@ func (g *GoogleSheet) SheetAdd() (result Result) {
 
 	if err != nil {
 		result = GenError(err.Error())
-		return
+	} else {
+		result.Result = true
 	}
-	result.Result = true
 	return
 }
 
@@ -307,6 +333,8 @@ func (g *GoogleSheet) ColumnDelete(limit int64) (result Result) {
 
 	if err != nil {
 		result = GenError(err.Error())
+	} else {
+		result.Result = true
 	}
 	return
 }
@@ -353,9 +381,10 @@ func (g *GoogleSheet) GroupInsert(actions []GoogleAction) (result Result) {
 	if err != nil {
 		result = GenError(err.Error())
 		return
+	} else {
+		result.Result = true
 	}
 
-	result.Result = true
 	return
 }
 
@@ -421,37 +450,68 @@ func (g *GoogleSheet) ColumnInsert(actions []GoogleAction) (result Result) {
 	if err != nil {
 		result = GenError(err.Error())
 		return
+	} else {
+		result.Result = true
 	}
 
-	result.Result = true
+	return
+}
+
+// RowsDelete удаляет строки
+func (g *GoogleSheet) RowsDelete(rows []int) (result Result) {
+	var err error
+	var reqs []*sheets.Request
+	var buRequest *sheets.BatchUpdateSpreadsheetRequest
+	for _, row := range rows {
+		reqs = append(reqs, &sheets.Request{
+			DeleteRange: &sheets.DeleteRangeRequest{
+				ShiftDimension: "ROWS",
+				Range: &sheets.GridRange{
+					StartRowIndex: int64(row),
+					EndRowIndex:   int64(row + 1),
+					SheetId:       g.SheetID,
+				},
+			},
+		})
+	}
+
+	if len(reqs) > 0 {
+
+		buRequest = &sheets.BatchUpdateSpreadsheetRequest{
+			Requests: reqs,
+		}
+
+		_, err = g.Service.Spreadsheets.BatchUpdate(g.Spreadsheet, buRequest).Do()
+
+		if err != nil {
+			result = GenError(err.Error())
+		} else {
+			result.Result = true
+		}
+
+	}
+
 	return
 }
 
 // RowsInsert добавляет строки
-func (g *GoogleSheet) RowsInsert(keys map[int]string, data map[string][]AnswerOption) (result Result) {
+func (g *GoogleSheet) RowsInsert(key int64, data []GoogleRow) (result Result) {
 
 	var offset int64 = 2
-	var firstRow int64
-	for key := range keys {
-		_key := int64(key)
-		if _key > firstRow {
-			firstRow = _key
-		}
-	}
 
 	var err error
 	var reqs []*sheets.Request
 	var buRequest *sheets.BatchUpdateSpreadsheetRequest
 
 	var row int64
-	for _, answers := range data {
-		for column, answer := range answers {
+	for _, item := range data {
+		for column, answer := range item.Data {
 
 			reqs = append(reqs, &sheets.Request{
 				UpdateCells: &sheets.UpdateCellsRequest{
 					Range: &sheets.GridRange{
-						StartRowIndex:    firstRow + row + offset,
-						EndRowIndex:      firstRow + row + offset + 1,
+						StartRowIndex:    key + row + offset,
+						EndRowIndex:      key + row + offset + 1,
 						StartColumnIndex: int64(column),
 						EndColumnIndex:   int64(column + 1),
 						SheetId:          g.SheetID,
@@ -485,11 +545,11 @@ func (g *GoogleSheet) RowsInsert(keys map[int]string, data map[string][]AnswerOp
 
 		if err != nil {
 			result = GenError(err.Error())
+		} else {
+			result.Result = true
 		}
 
 	}
-
-	result.Result = true
 	return
 }
 

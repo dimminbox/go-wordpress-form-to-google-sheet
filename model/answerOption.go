@@ -11,6 +11,7 @@ type AnswerOption struct {
 	Value    string `json:"value"`
 }
 
+
 // Usefull - полезнаый ли ответ
 func (a *AnswerOption) Usefull() (result bool) {
 	for _, typeName := range ExcTypes {
